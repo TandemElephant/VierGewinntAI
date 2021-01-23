@@ -6,6 +6,11 @@ from copy import deepcopy
 EMPTY = 0
 
 
+class FullBoardException(Exception):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+
 class VierGewinnt:
     def __init__(self, player1, player2):
 
@@ -148,15 +153,31 @@ class DeepAgent(Player):
 
     def make_move(self, state):
 
+        available_columns = np.arange(7)[np.sum(state == EMPTY, axis=0) > 0]
+
+        # no available move
+        if len(available_columns) == 0:
+            raise FullBoardException("Cannot make move, board is full.")
+
         # random exploration move
         if random.random() < self.exp_factor:
-            available_columns = np.arange(7)[np.sum(state == EMPTY, axis=0) > 0]
             col = random.choice(available_columns)
-            row = np.sum(state[:, col] == EMPTY) - 1
-            new_state = deepcopy(state)
-            new_state[row, col] = self.tag_val
+            new_state = self.insert_piece(state, col)
+
+        # make optimal move
         else:
-            new_state = self.make_optimal_move(state)
+            optimal_move_value = -np.inf
+            optimal_moves = []
+            for col in available_columns:
+                move_value = self.calc_move_value(state, col)
+                if move_value > optimal_move_value:
+                    optimal_moves = [col]
+                    optimal_move_value = move_value
+                elif move_value == optimal_move_value:
+                    optimal_moves.append(col)
+
+            optimal_move = random.choice(optimal_moves)
+            new_state = self.insert_piece(state, optimal_move)
 
         return new_state
 
@@ -171,5 +192,8 @@ class DeepAgent(Player):
 
         return new_state
 
-    def make_optimal_move(self, state):
+    def calc_state_value(self, state):
+        pass
+
+    def calc_move_value(self, state, column, iteration=1):
         pass
