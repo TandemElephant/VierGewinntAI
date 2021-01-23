@@ -1,8 +1,12 @@
 import numpy as np
+import random
+from scipy.signal import convolve2d
 from copy import deepcopy
 
-class VierGewinnt():
+EMPTY = 0
 
+
+class VierGewinnt:
     def __init__(self, player1, player2):
 
         self.player1 = player1
@@ -62,8 +66,36 @@ class VierGewinnt():
             self.state = self.play_move(learn=True)
 
     def check_winner(self):
-        pass
+        winner_positions = [
+            np.array([[1],
+                      [1],
+                      [1],
+                      [1]]),
+            np.array([[1, 1, 1, 1]]),
+            np.array([[1, 0, 0, 0],
+                      [0, 1, 0, 0],
+                      [0, 0, 1, 0],
+                      [0, 0, 0, 1]]),
+            np.array([[0, 0, 0, 1],
+                      [0, 0, 1, 0],
+                      [0, 1, 0, 0],
+                      [1, 0, 0, 0]]),
+        ]
 
+        for win_pos in winner_positions:
+            convolved_state = convolve2d(self.state, win_pos, mode='valid')
+
+            if (convolved_state == 4).any():
+                self.winner = self.player1.tag
+                break
+            elif (convolved_state == -4).any():
+                self.winner = self.player2.tag
+                break
+            elif (convolved_state != EMPTY).all():
+                self.winner = "Nobody (tie)"
+                break
+
+            return self.winner
 
     def play_move(self, learn=False):
 
@@ -83,10 +115,11 @@ class VierGewinnt():
             self.turn = 'X'
             self.turn_player = self.player1
 
+    def print_game(self):
+        print(self.state)
 
 
-class Player():
-    
+class Player:
     def __init__(self):
         self.tag = None
         self.tag_val = None
@@ -97,9 +130,46 @@ class Player():
             return state
         else:
             col = int(input('Choose a column (0-6): '))
-            # find last available space in chosen column and fill it
-            row = np.sum(state[:, col] == 0) - 1
-            s = deepcopy(state)
-            s[row, col] = self.tag_val
-            
-            return s
+            new_state = self.insert_piece(state, col)
+            return new_state
+
+    def insert_piece(self, state, column):
+        # find last available space in chosen column and fill it
+        row = np.sum(state[:, column] == EMPTY) - 1
+        new_state = deepcopy(state)
+        new_state[row, column] = self.tag_val
+        return new_state
+
+
+class DeepAgent(Player):
+    def __init__(self, exploration_factor=0.2):
+        super().__init__()
+        self.exp_factor = exploration_factor
+
+    def make_move(self, state):
+
+        # random exploration move
+        if random.random() < self.exp_factor:
+            available_columns = np.arange(7)[np.sum(state == EMPTY, axis=0) > 0]
+            col = random.choice(available_columns)
+            row = np.sum(state[:, col] == EMPTY) - 1
+            new_state = deepcopy(state)
+            new_state[row, col] = self.tag_val
+        else:
+            new_state = self.make_optimal_move(state)
+
+        return new_state
+
+    def make_move_and_learn(self, state, winner):
+
+        self.learn_state(state, winner)
+
+        if winner is None:
+            new_state = self.make_move(state)
+        else:
+            new_state = state
+
+        return new_state
+
+    def make_optimal_move(self, state):
+        pass
