@@ -19,34 +19,30 @@ class FullColumnException(Exception):
 
 
 class Player:
-    def __init__(self):
+    def __init__(self, name):
         self.game = Game()
         self.is_human = True
-        self.tag = None
+        self.name = name
 
-    def make_move(self, state):
-        if self.tag is None:
-            print('Please put the player in a game before making a move.')
-            return state
-        else:
-            column = int(input('Choose a column (0-6): '))
-            new_state = self.game.insert_piece(self.tag, column)
-            return new_state
+    def make_move(self, state, learn=False):
+        available_moves = self.game.get_available_moves(state)
+        move = int(input(f'Choose a move {available_moves}: '))
+        new_state = self.game.insert_piece(self.name, move)
+        return new_state
 
 
 class DeepAgent(Player):
-    def __init__(self, learning_rate=0.1, exploration_factor=0.2, iteration=1, train_epoch_per_move=10,
+    def __init__(self, name, learning_rate=0.1, exploration_factor=0.2, iteration=1, train_epoch_per_move=10,
                  value_model=keras.models.Sequential()):
-        super().__init__()
+        super().__init__(name)
         self.learning_rate = learning_rate
         self.exp_factor = exploration_factor
         self.is_human = False
         self.iteration = iteration
         self.value_model = value_model
         self.epochs = train_epoch_per_move
-        self.prev_state = None
 
-    def make_move(self, state, exp_factor=0.0):
+    def find_move(self, state, exp_factor=0.0):
 
         available_moves = self.game.get_available_moves()
 
@@ -56,57 +52,60 @@ class DeepAgent(Player):
 
         # one available move
         elif len(available_moves) == 1:
-            new_state = self.game.insert_piece(self.tag, available_moves[0],  state)
+            result_move = available_moves[0]
 
         # more than one available move
         else:
 
             # make random exploration move
             if random.random() < exp_factor:
-                col = random.choice(available_moves)
-                new_state = self.game.insert_piece(self.tag, col,  state)
+                result_move = random.choice(available_moves)
 
             # make optimal move
             else:
                 optimal_move_value = -np.inf
                 optimal_moves = []
-                for col in available_moves:
-                    move_value = self.calc_move_value(state, col)
+                for move in available_moves:
+                    move_value = self.calc_move_values(state, move)
                     if move_value > optimal_move_value:
-                        optimal_moves = [col]
+                        optimal_moves = [move]
                         optimal_move_value = move_value
                     elif move_value == optimal_move_value:
-                        optimal_moves.append(col)
+                        optimal_moves.append(move)
 
-                optimal_move = random.choice(optimal_moves)
-                new_state = self.game.insert_piece(self.tag, optimal_move, state)
+                result_move = random.choice(optimal_moves)
 
-        return new_state
+        return result_move
 
-    def make_move_and_learn(self, state, winner):
+    def make_move(self, state, learn=False):
 
-        self.learn_state(state, winner)
-
-        if winner is None:
-            new_state = self.make_move(state, exp_factor=self.exp_factor)
+        if learn is False:
+            move = self.find_move(state)
         else:
-            new_state = state
+            move = self.find_move(state, self.exp_factor)
 
+        new_state = self.game.insert_piece(self.name, move, state)
         return new_state
 
     def calc_state_value(self, state):
         return self.value_model.predict(state.reshape(1, *state.shape, 1))
 
-    def calc_move_value(self, state, move, iteration=None):
+    def calc_move_values(self, state, moves, iteration=None):
         if iteration is None:
             iteration = self.iteration
 
-        temp_state = self.game.insert_piece(self.tag, move, state)
+        temp_states = [self.game.insert_piece(self.name, move, state) for move in moves]
+
+        # check if won
+        winner = self.game.check_winner(temp_state)
+        if winner is not None:
+            return self.calc_reward(winner)
+
         available_opp_moves = self.game.get_available_moves(temp_state)
         opp_move_values = []
 
         for opp_move in available_opp_moves:
-            temp_state_after_opp = self.game.insert_piece(self.game.player2.tag, opp_move, temp_state)
+            temp_state_after_opp = self.game.insert_piece(self.game.player2.name, opp_move, temp_state)
             if iteration == 1:
                 opp_move_values.append(self.calc_state_value(temp_state_after_opp))
             else:
@@ -116,22 +115,33 @@ class DeepAgent(Player):
                 else:
                     self_move_values = []
                     for self_move in available_self_moves:
-                        self_move_values.append(self.calc_move_value(temp_state_after_opp, self_move, iteration - 1))
+                        self_move_values.append(self.calc_move_values(temp_state_after_opp, self_move, iteration - 1))
                     opp_move_values.append(np.max(self_move_values))
 
         return np.min(opp_move_values)
 
-    def learn_state(self, state, winner):
+    def learn_from_game(self, game_history, winner):
 
-        if self.prev_state is None:
-            pass
-        else:
-            target_for_prev_state = self.calc_target(state, winner)
-            self.value_model.fit(self.prev_state.reshape(1, *self.prev_state.shape, 1),
+        self_states = [state for name, state in game_history if name == self.name]
+
+        # learn reward for last state
+        reward = self.calc_reward(winner)
+        last_state_value = self.calc_state_value(self_states[-1])
+        value_diff = reward - last_state_value
+        target = last_state_value + self.learning_rate * value_diff
+        self.value_model.fit(self_states[-1].reshape(1, *self_states[-1].shape, 1),
+                             np.array(target),
+                             epochs=self.epochs, verbose=0)
+
+        # learn values of previous states
+        for state, prev_state in zip(self_states[len(self_states)-1:0:-1], self_states[len(self_states)-2::-1]):
+            state_value = self.calc_state_value(state)
+            prev_state_value = self.calc_state_value(prev_state)
+            value_diff = state_value - prev_state_value
+            target_for_prev_state = prev_state_value + self.learning_rate * value_diff
+            self.value_model.fit(prev_state.reshape(1, *prev_state.shape, 1),
                                  np.array(target_for_prev_state),
                                  epochs=self.epochs, verbose=0)
-
-        self.prev_state = state
 
     def calc_target(self, state, winner):
 
@@ -146,7 +156,7 @@ class DeepAgent(Player):
         return target
 
     def calc_reward(self, winner):
-        if winner == self.tag:
+        if winner == self.name:
             return 1
         elif winner is None:
             return 0
@@ -155,6 +165,9 @@ class DeepAgent(Player):
         else:  # loss
             return -1
 
+    def save_model(self, path='./'):
+        file_path = f'{path}/deepagent_{self.name}.h5'
+        self.value_model.save(file_path)
 
 class Game:
     def __init__(self):
@@ -166,7 +179,7 @@ class Game:
     def play_game(self):
         pass
 
-    def play_games_for_learning(self):
+    def play_games_for_learning(self, n_games: int):
         pass
 
     def get_available_moves(self, state=None):
@@ -175,35 +188,43 @@ class Game:
     def check_winner(self, state=None):
         return None
 
-    def insert_piece(self, tag, move, state=None):
+    def insert_piece(self, player_name, move, state=None):
         return state
 
 class VierGewinnt(Game):
     def __init__(self, player1: Player, player2: Player):
 
-        self.tags = ['X','O']
+        super().__init__()
+
+        self.markers = ['X', 'O']
         self.vals = [1, -1]
-        self.tag2val = {tag: val for tag, val in zip(self.tags, self.vals)}
-        self.val2tag = {val: tag for tag, val in zip(self.tags, self.vals)}
+        self.marker2val = {marker: val for marker, val in zip(self.markers, self.vals)}
+        self.val2marker = {val: marker for marker, val in zip(self.markers, self.vals)}
+
+        # assign players
+        self.name2val = {}
 
         self.player1 = player1
         self.player1.game = self
-        self.player1.tag = self.tags[0]
+        self.name2val[player1.name] = self.vals[0]
         self.player2 = player2
         self.player2.game = self
-        self.player2.tag = self.tags[1]
+        self.name2val[player2.name] = self.vals[1]
+
+        self.val2name = {val: name for name, val in self.name2val.items()}
 
         # init game
-        self.state = np.zeros((6, 7))
+        self.state = np.array((6, 7))
         self.winner = None
-        self.turn = self.tags[0]
         self.turn_player = self.player1
+        self.game_history = []
 
     def init_game(self):
+
         self.state = np.zeros((6, 7))
         self.winner = None
-        self.turn = 'X'
         self.turn_player = self.player1
+        self.game_history = []
         
     def play_game(self):
         self.init_game()
@@ -212,7 +233,7 @@ class VierGewinnt(Game):
 
             if self.turn_player.is_human:
                 self.print_game()
-                print(f"{self.turn_player.tag}'s turn.")
+                print(f"{self.turn_player.name}'s turn.")
 
             self.state = self.play_move()
 
@@ -220,12 +241,23 @@ class VierGewinnt(Game):
             if self.winner is not None:
                 break
 
-        self.print_game()
-        print(f"The winner is: {self.winner}")
+        # record winning position
+        self.game_history.append((self.turn_player.name, self.state))
 
-    def play_games_for_learning(self, n_games):
+        if self.player1.is_human or self.player2.is_human:
+            self.print_game()
+            print(f"The winner is: {self.winner}")
+
+        return self.winner
+
+    def play_games_for_learning(self, n_games: int):
+
+        test_results_1 = []
+        test_results_2 = []
 
         for i in tqdm(range(n_games)):
+
+            self.init_game()
 
             while self.winner is None:
                 self.state = self.play_move(learn=True)
@@ -237,12 +269,38 @@ class VierGewinnt(Game):
                 self.state = self.play_move(learn=True)
                 self.winner = self.check_winner()
 
-            # update loser's state
-            self.state = self.play_move(learn=True)
-            self.state = self.play_move(learn=True)
-            # update winner's state
-            self.state = self.play_move(learn=True)
-            self.state = self.play_move(learn=True)
+            self.game_history.append((self.turn_player.name, self.state))
+
+            self.player1.learn_from_game(self.game_history, self.winner)
+            self.player2.learn_from_game(self.game_history, self.winner)
+
+            # test on dummies
+            if (i+1) % 100 == 0:
+                test_results_1.append(self.test_against_dummy(50, player1=self.player1))
+                test_results_2.append(self.test_against_dummy(50, player2=self.player2))
+
+        return test_results_1, test_results_2
+
+    def test_against_dummy(self, n_games, player1=None, player2=None):
+
+        dummy = DeepAgent("Dummy", exploration_factor=1)
+        test_player = DeepAgent("Test")
+
+        if player1 is not None and player2 is None:
+            test_player.value_model = player1.value_model
+            test_game = VierGewinnt(test_player, dummy)
+        elif player1 is None and player2 is not None:
+            test_player.value_model = player2.value_model
+            test_game = VierGewinnt(dummy, test_player)
+        else:
+            raise ValueError
+
+        score = 0
+        for i in range(n_games):
+            winner = test_game.play_game()
+            score += float(winner == test_player.name) / n_games
+
+        return score
 
     def check_winner(self, state=None):
         if state is None:
@@ -269,10 +327,10 @@ class VierGewinnt(Game):
             convolved_state = convolve2d(state, win_pos, mode='valid')
 
             if (convolved_state == 4).any():
-                winner = self.player1.tag
+                winner = self.player1.name
                 break
             elif (convolved_state == -4).any():
-                winner = self.player2.tag
+                winner = self.player2.name
                 break
             elif (convolved_state != EMPTY).all():
                 winner = False
@@ -282,26 +340,23 @@ class VierGewinnt(Game):
 
     def play_move(self, learn=False):
 
-        if learn is True:
-            new_state = self.turn_player.make_move_and_learn(self.state, self.winner)
-        else:
-            new_state = self.turn_player.make_move(self.state)
+        self.game_history.append((self.turn_player.name, self.state))
+
+        new_state = self.turn_player.make_move(self.state, learn)
 
         self.next_player()
         return new_state
 
     def next_player(self):
-        if self.turn == self.player1.tag:
-            self.turn = self.player2.tag
+        if self.turn_player.name == self.player1.name:
             self.turn_player = self.player2
         else:
-            self.turn = self.player1.tag
             self.turn_player = self.player1
 
     def print_game(self):
         print(self.state)
 
-    def insert_piece(self, tag, column, state=None):
+    def insert_piece(self, player_name, column, state=None):
         if state is None:
             state = self.state
 
@@ -311,7 +366,7 @@ class VierGewinnt(Game):
         # find last available space in chosen column and fill it
         row = np.sum(state[:, column] == EMPTY) - 1
         new_state = deepcopy(state)
-        new_state[row, column] = self.tag2val[tag]
+        new_state[row, column] = self.name2val[player_name]
         return new_state
 
     def get_available_moves(self, state=None):
