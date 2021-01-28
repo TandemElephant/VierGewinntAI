@@ -278,8 +278,12 @@ class VierGewinnt(Game):
 
             # test on dummies
             if (i+1) % 100 == 0:
-                test_results_1.append(self.test_against_dummy(50, player1=self.player1))
-                test_results_2.append(self.test_against_dummy(50, player2=self.player2))
+                score1 = self.test_against_dummy(50, player1=self.player1)
+                test_results_1.append(score1)
+                score2 = self.test_against_dummy(50, player2=self.player2)
+                test_results_2.append(score2)
+
+                print(f"{self.player1.name}: {score1}    {self.player2.name}: {score2}")
 
         return test_results_1, test_results_2
 
