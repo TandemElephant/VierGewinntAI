@@ -25,11 +25,21 @@ class Player:
         self.is_human = True
         self.name = name
 
-    def make_move(self, state, learn=False):
+    def find_move(self, state, learn=False):
+        valid_move = False
         available_moves = self.game.get_available_moves(state)
-        move = int(input(f'Choose a move {available_moves}: '))
-        new_state = self.game.insert_piece(self.name, move)
-        return new_state
+        while not valid_move:
+            move = input(f'Choose a move {available_moves}: ')
+            try:
+                move = int(move)
+                if move in available_moves:
+                    valid_move = True
+                else:
+                    print(f"Invalid move: {move}")
+            except ValueError:
+                print(f"Invalid move: {move}")
+
+        return move
 
 
 class DummyAgent(Player):
@@ -37,10 +47,10 @@ class DummyAgent(Player):
         super().__init__(name)
         self.is_human = False
 
-    def make_move(self, state, learn=False):
+    def find_move(self, state, learn=False):
         available_moves = self.game.get_available_moves(state)
         move = random.choice(available_moves)
-        return self.game.insert_piece(self.name, move)
+        return move
 
 
 class DeepAgent(Player):
@@ -54,7 +64,12 @@ class DeepAgent(Player):
         self.value_model = value_model
         self.epochs = train_epoch_per_move
 
-    def find_move(self, state, exp_factor=0.0):
+    def find_move(self, state, learn=False):
+
+        if learn:
+            exp_factor = self.exp_factor
+        else:
+            exp_factor = 0
 
         available_moves = self.game.get_available_moves()
 
@@ -68,7 +83,6 @@ class DeepAgent(Player):
 
         # more than one available move
         else:
-
             # make random exploration move
             if random.random() < exp_factor:
                 result_move = random.choice(available_moves)
@@ -79,16 +93,6 @@ class DeepAgent(Player):
                 result_move = random.choice(available_moves[move_values == np.max(move_values)])
 
         return result_move
-
-    def make_move(self, state, learn=False):
-
-        if learn is False:
-            move = self.find_move(state)
-        else:
-            move = self.find_move(state, self.exp_factor)
-
-        new_state = self.game.insert_piece(self.name, move, state)
-        return new_state
 
     def calc_state_values(self, states):
         return self.value_model.predict(states.reshape(*states.shape, 1)).ravel()
@@ -231,6 +235,8 @@ class VierGewinnt(Game):
         self.player2.game = self
         self.name2val[player2.name] = self.vals[2]
 
+        self.is_human_playing = self.player1.is_human or self.player2.is_human
+
         self.val2name = {val: name for name, val in self.name2val.items()}
 
         # init game
@@ -270,7 +276,7 @@ class VierGewinnt(Game):
 
         return self.winner
 
-    def play_games_for_learning(self, n_games: int):
+    def play_games_for_learning(self, n_games: int, test_player1=DummyAgent("Dummy1"), test_player2=DummyAgent("Dummy2")):
 
         test_results_1 = []
         test_results_2 = []
@@ -283,12 +289,6 @@ class VierGewinnt(Game):
                 self.state = self.play_move(learn=True)
                 self.winner = self.check_winner()
 
-                if self.winner is not None:
-                    break
-
-                self.state = self.play_move(learn=True)
-                self.winner = self.check_winner()
-
             self.game_history.append((self.turn_player.name, self.state))
 
             self.player1.learn_from_game(self.game_history, self.winner)
@@ -296,26 +296,25 @@ class VierGewinnt(Game):
 
             # test on dummies
             if (i+1) % 100 == 0:
-                win1, tie1, lose1 = self.test_against_dummy(50, player1=self.player1)
+                win1, tie1, lose1 = self.test_against_dummy(50, player1=self.player1, dummy=test_player2)
                 test_results_1.append((win1, tie1, lose1))
-                win2, tie2, lose2 = self.test_against_dummy(50, player2=self.player2)
+                win2, tie2, lose2 = self.test_against_dummy(50, player2=self.player2, dummy=test_player1)
                 test_results_2.append((win2, tie2, lose2))
 
                 print(f"{self.player1.name}: {win1:.2f}/{tie1:.2f}/{lose1:.2f}    {self.player2.name}: {win2:.2f}/{tie2:.2f}/{lose2:.2f}")
 
         return test_results_1, test_results_2
 
-    def test_against_dummy(self, n_games, player1=None, player2=None):
+    def test_against_dummy(self, n_games, player1=None, player2=None, dummy=DummyAgent("Dummy")):
 
-        dummy = DummyAgent("Dummy")
-        test_player = DeepAgent("Test")
+        player_under_test = DeepAgent("Test")
 
         if player1 is not None and player2 is None:
-            test_player.value_model = player1.value_model
-            test_game = VierGewinnt(test_player, dummy)
+            player_under_test.value_model = player1.value_model
+            test_game = VierGewinnt(player_under_test, dummy)
         elif player1 is None and player2 is not None:
-            test_player.value_model = player2.value_model
-            test_game = VierGewinnt(dummy, test_player)
+            player_under_test.value_model = player2.value_model
+            test_game = VierGewinnt(dummy, player_under_test)
         else:
             raise ValueError
 
@@ -324,9 +323,9 @@ class VierGewinnt(Game):
         lose = 0.0
         for i in range(n_games):
             winner = test_game.play_game()
-            if winner == test_player.name:
+            if winner == player_under_test.name:
                 win += 1/n_games
-            elif winner == False:
+            elif winner is False:
                 tie += 1/n_games
             else:
                 lose += 1/n_games
@@ -373,7 +372,11 @@ class VierGewinnt(Game):
 
         self.game_history.append((self.turn_player.name, self.state))
 
-        new_state = self.turn_player.make_move(self.state, learn)
+        move = self.turn_player.find_move(self.state, learn)
+        new_state = self.insert_piece(self.turn_player.name, move)
+
+        if self.is_human_playing and self.turn_player.is_human is False:
+            print(f"{self.turn_player.name}'s move: {move}")
 
         self.next_player()
         return new_state
@@ -394,9 +397,9 @@ class VierGewinnt(Game):
         # spacing_row = " " + " ".join(["_"]*7) + " "
         for row in self.state:
             markers_in_row = [self.val2marker[val] for val in row]
-            print(f"|{'|'.join(markers_in_row)}|")
+            print(f"| {' | '.join(markers_in_row)} |")
             # print(spacing_row)
-        print(" " + " ".join([f"{i}" for i in range(7)]) + " ")
+        print(" " + " ".join([f" {i} " for i in range(7)]) + "  ")
 
     def insert_piece(self, player_name, column, state=None):
         if state is None:
