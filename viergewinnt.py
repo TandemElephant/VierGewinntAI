@@ -297,7 +297,7 @@ class VierGewinnt(Game):
         else:
             raise ValueError
 
-        score = 0
+        score = 0.0
         for i in range(n_games):
             winner = test_game.play_game()
             score += float(winner == test_player.name) / n_games
@@ -334,7 +334,7 @@ class VierGewinnt(Game):
             elif (convolved_state == -4).any():
                 winner = self.player2.name
                 break
-            elif (convolved_state != EMPTY).all():
+            elif (state != EMPTY).all():
                 winner = False
                 break
 
