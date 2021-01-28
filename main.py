@@ -29,14 +29,6 @@ if __name__ == '__main__':
     player1.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
     player2.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
 
-    print("Player1 win rate against dummy:")
-    print(test_results_1)
-    print("\n")
-
-    print("Player2 win rate against dummy:")
-    print(test_results_2)
-    print("\n")
-
     # import cProfile, pstats
     # profiler = cProfile.Profile()
     # profiler.enable()

@@ -278,12 +278,12 @@ class VierGewinnt(Game):
 
             # test on dummies
             if (i+1) % 100 == 0:
-                score1 = self.test_against_dummy(50, player1=self.player1)
-                test_results_1.append(score1)
-                score2 = self.test_against_dummy(50, player2=self.player2)
-                test_results_2.append(score2)
+                win1, tie1, lose1 = self.test_against_dummy(50, player1=self.player1)
+                test_results_1.append((win1, tie1, lose1))
+                win2, tie2, lose2 = self.test_against_dummy(50, player2=self.player2)
+                test_results_2.append((win2, tie2, lose2))
 
-                print(f"{self.player1.name}: {score1}    {self.player2.name}: {score2}")
+                print(f"{self.player1.name}: {win1:.2f}/{tie1:.2f}/{lose1:.2f}    {self.player2.name}: {win2:.2f}/{tie2:.2f}/{lose2:.2f}")
 
         return test_results_1, test_results_2
 
@@ -301,12 +301,19 @@ class VierGewinnt(Game):
         else:
             raise ValueError
 
-        score = 0.0
+        win = 0.0
+        tie = 0.0
+        lose = 0.0
         for i in range(n_games):
             winner = test_game.play_game()
-            score += float(winner == test_player.name) / n_games
+            if winner == test_player.name:
+                win += 1/n_games
+            elif winner == False:
+                tie += 1/n_games
+            else:
+                lose += 1/n_games
 
-        return score
+        return win, tie, lose
 
     def check_winner(self, state=None):
         if state is None:
