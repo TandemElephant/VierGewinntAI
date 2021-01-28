@@ -32,6 +32,17 @@ class Player:
         return new_state
 
 
+class DummyAgent(Player):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_human = False
+
+    def make_move(self, state, learn=False):
+        available_moves = self.game.get_available_moves(state)
+        move = random.choice(available_moves)
+        return self.game.insert_piece(self.name, move)
+
+
 class DeepAgent(Player):
     def __init__(self, name, learning_rate=0.1, exploration_factor=0.2, iteration=1, train_epoch_per_move=10,
                  value_model=keras.models.Sequential()):
@@ -89,13 +100,14 @@ class DeepAgent(Player):
 
         self_move_idx = []
         opp_move_idx = []
+        opp_name = self.game.get_opponent_name(self.name)
 
         moves_and_temp_states = np.array([['', f'{move}', self.game.insert_piece(self.name, move, state)]
                                           for move in moves],
                                          dtype='object')
 
         moves_and_temp_states = np.array([[prev_move, f'{prev_move}{move if move != NO_MOVE else ""}',
-                                           self.game.insert_piece(self.name, move, temp_state)
+                                           self.game.insert_piece(opp_name, move, temp_state)
                                            ]
                                           for prev_move, temp_state in moves_and_temp_states[:, 1:]
                                           for move in self.game.get_available_moves(temp_state)],
@@ -112,7 +124,7 @@ class DeepAgent(Player):
             self_move_idx.append(moves_and_temp_states[:, 0])
 
             moves_and_temp_states = np.array([[prev_move, f'{prev_move}{move if move != NO_MOVE else ""}',
-                                               self.game.insert_piece(self.name, move, temp_state)
+                                               self.game.insert_piece(opp_name, move, temp_state)
                                                ]
                                               for prev_move, temp_state in moves_and_temp_states[:, 1:]
                                               for move in self.game.get_available_moves(temp_state)],
@@ -163,7 +175,7 @@ class DeepAgent(Player):
         elif winner is None:
             return 0
         elif winner is False:  # draw
-            return 0
+            return 0.5
         else:  # loss
             return -1
 
@@ -172,11 +184,8 @@ class DeepAgent(Player):
         file_path = f'{path}/deepagent_{self.name}.h5'
         self.value_model.save(file_path)
 
-    def load_model(self, path='./', use_name=True):
-        if use_name:
-            file_path = f'{path}/deepagent_{self.name}.h5'
-        else:
-            file_path = path
+    def load_model(self, path='./'):
+        file_path = f'{path}/deepagent_{self.name}.h5'
         self.value_model = keras.models.load_model(file_path)
 
 
@@ -207,8 +216,8 @@ class VierGewinnt(Game):
 
         super().__init__()
 
-        self.markers = ['X', 'O']
-        self.vals = [1, -1]
+        self.markers = [' ', 'X', 'O']
+        self.vals = [EMPTY, 1, -1]
         self.marker2val = {marker: val for marker, val in zip(self.markers, self.vals)}
         self.val2marker = {val: marker for marker, val in zip(self.markers, self.vals)}
 
@@ -217,10 +226,10 @@ class VierGewinnt(Game):
 
         self.player1 = player1
         self.player1.game = self
-        self.name2val[player1.name] = self.vals[0]
+        self.name2val[player1.name] = self.vals[1]
         self.player2 = player2
         self.player2.game = self
-        self.name2val[player2.name] = self.vals[1]
+        self.name2val[player2.name] = self.vals[2]
 
         self.val2name = {val: name for name, val in self.name2val.items()}
 
@@ -298,7 +307,7 @@ class VierGewinnt(Game):
 
     def test_against_dummy(self, n_games, player1=None, player2=None):
 
-        dummy = DeepAgent("Dummy", exploration_factor=1)
+        dummy = DummyAgent("Dummy")
         test_player = DeepAgent("Test")
 
         if player1 is not None and player2 is None:
@@ -375,8 +384,19 @@ class VierGewinnt(Game):
         else:
             self.turn_player = self.player1
 
+    def get_opponent_name(self, player_name):
+        if player_name == self.player1.name:
+            return self.player2.name
+        else:
+            return self.player1.name
+
     def print_game(self):
-        print(self.state)
+        # spacing_row = " " + " ".join(["_"]*7) + " "
+        for row in self.state:
+            markers_in_row = [self.val2marker[val] for val in row]
+            print(f"|{'|'.join(markers_in_row)}|")
+            # print(spacing_row)
+        print(" " + " ".join([f"{i}" for i in range(7)]) + " ")
 
     def insert_piece(self, player_name, column, state=None):
         if state is None:
