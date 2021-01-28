@@ -4,30 +4,31 @@ from keras.layers import Conv2D, Dense, Flatten
 from keras.activations import relu, sigmoid
 
 
+
 if __name__ == '__main__':
 
-    model1 = Sequential()
-    model1.add(Conv2D(20, kernel_size=(4, 4), input_shape=(6, 7, 1), activation=relu))
-    model1.add(Flatten())
-    model1.add(Dense(10, activation=relu))
-    model1.add(Dense(1, activation=sigmoid))
-    model1.compile(loss='mse')
-    player1 = DeepAgent("Robot1", value_model=model1, exploration_factor=1, iteration=2)
-
-    model2 = Sequential()
-    model2.add(Conv2D(20, kernel_size=(4, 4), input_shape=(6, 7, 1), activation=relu))
-    model2.add(Flatten())
-    model2.add(Dense(64, activation=relu))
-    model2.add(Dense(16, activation=relu))
-    model2.add(Dense(1, activation=sigmoid))
-    model2.compile(loss='mse')
-    player2 = DeepAgent("Robot2", value_model=model2, exploration_factor=1)
-
-    game = VierGewinnt(player1, player2)
-
-    test_results_1, test_results_2 = game.play_games_for_learning(1000)
-    player1.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
-    player2.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
+    # model1 = Sequential()
+    # model1.add(Conv2D(20, kernel_size=(4, 4), input_shape=(6, 7, 1), activation=relu))
+    # model1.add(Flatten())
+    # model1.add(Dense(10, activation=relu))
+    # model1.add(Dense(1, activation=sigmoid))
+    # model1.compile(loss='mse')
+    # player1 = DeepAgent("Robot1", value_model=model1, exploration_factor=1, iteration=2)
+    #
+    # model2 = Sequential()
+    # model2.add(Conv2D(20, kernel_size=(4, 4), input_shape=(6, 7, 1), activation=relu))
+    # model2.add(Flatten())
+    # model2.add(Dense(64, activation=relu))
+    # model2.add(Dense(16, activation=relu))
+    # model2.add(Dense(1, activation=sigmoid))
+    # model2.compile(loss='mse')
+    # player2 = DeepAgent("Robot2", value_model=model2, exploration_factor=1)
+    #
+    # game = VierGewinnt(player1, player2)
+    #
+    # test_results_1, test_results_2 = game.play_games_for_learning(1000)
+    # player1.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
+    # player2.save_model('D:/Users/apist/PycharmProjects/VierGewinntAI')
 
     # import cProfile, pstats
     # profiler = cProfile.Profile()
@@ -37,7 +38,9 @@ if __name__ == '__main__':
     # stats = pstats.Stats(profiler).sort_stats('cumtime')
     # stats.print_stats()
 
-# # play against AI
-# player1 = Player()
-# game = VierGewinnt(player1, player2)
-# game.play_game()
+    # play against AI
+    player1 = Player('Potyi')
+    player2 = DeepAgent('Robot2')
+    player2.load_model()
+    game = VierGewinnt(player1, player2)
+    game.play_game()

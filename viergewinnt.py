@@ -168,8 +168,17 @@ class DeepAgent(Player):
             return -1
 
     def save_model(self, path='./'):
+
         file_path = f'{path}/deepagent_{self.name}.h5'
         self.value_model.save(file_path)
+
+    def load_model(self, path='./', use_name=True):
+        if use_name:
+            file_path = f'{path}/deepagent_{self.name}.h5'
+        else:
+            file_path = path
+        self.value_model = keras.models.load_model(file_path)
+
 
 class Game:
     def __init__(self):
