@@ -1,4 +1,5 @@
 import numpy as np
+from numpy_groupby import groupby_np
 import random
 from scipy.signal import convolve2d
 from copy import deepcopy
@@ -6,7 +7,7 @@ import keras
 from tqdm import tqdm
 
 EMPTY = 0
-
+NO_MOVE = -999
 
 class FullBoardException(Exception):
     def __init__(self, *args):
@@ -63,17 +64,8 @@ class DeepAgent(Player):
 
             # make optimal move
             else:
-                optimal_move_value = -np.inf
-                optimal_moves = []
-                for move in available_moves:
-                    move_value = self.calc_move_values(state, move)
-                    if move_value > optimal_move_value:
-                        optimal_moves = [move]
-                        optimal_move_value = move_value
-                    elif move_value == optimal_move_value:
-                        optimal_moves.append(move)
-
-                result_move = random.choice(optimal_moves)
+                move_values = self.calc_move_values(state, available_moves)
+                result_move = random.choice(available_moves[move_values == np.max(move_values)])
 
         return result_move
 
@@ -87,38 +79,60 @@ class DeepAgent(Player):
         new_state = self.game.insert_piece(self.name, move, state)
         return new_state
 
-    def calc_state_value(self, state):
-        return self.value_model.predict(state.reshape(1, *state.shape, 1))
+    def calc_state_values(self, states):
+        return self.value_model.predict(states.reshape(*states.shape, 1)).ravel()
 
-    def calc_move_values(self, state, moves, iteration=None):
-        if iteration is None:
-            iteration = self.iteration
+    def calc_move_values(self, state, moves):
+        # calculate all possible states after #self.iteration number of self and opp moves,
+        # remember which moves led to which moves in self_move_idx and opp_move_idx
+        # calculate values for all states, then minimize/maximize according to remembered move indices
 
-        temp_states = [self.game.insert_piece(self.name, move, state) for move in moves]
+        self_move_idx = []
+        opp_move_idx = []
 
-        # check if won
-        winner = self.game.check_winner(temp_state)
-        if winner is not None:
-            return self.calc_reward(winner)
+        moves_and_temp_states = np.array([['', f'{move}', self.game.insert_piece(self.name, move, state)]
+                                          for move in moves],
+                                         dtype='object')
 
-        available_opp_moves = self.game.get_available_moves(temp_state)
-        opp_move_values = []
+        moves_and_temp_states = np.array([[prev_move, f'{prev_move}{move if move != NO_MOVE else ""}',
+                                           self.game.insert_piece(self.name, move, temp_state)
+                                           ]
+                                          for prev_move, temp_state in moves_and_temp_states[:, 1:]
+                                          for move in self.game.get_available_moves(temp_state)],
+                                         dtype='object')
+        opp_move_idx.append(moves_and_temp_states[:, 0])
 
-        for opp_move in available_opp_moves:
-            temp_state_after_opp = self.game.insert_piece(self.game.player2.name, opp_move, temp_state)
-            if iteration == 1:
-                opp_move_values.append(self.calc_state_value(temp_state_after_opp))
-            else:
-                available_self_moves = self.game.get_available_moves(temp_state_after_opp)
-                if len(available_self_moves) <= 1:
-                    opp_move_values.append(self.calc_state_value(temp_state_after_opp))
-                else:
-                    self_move_values = []
-                    for self_move in available_self_moves:
-                        self_move_values.append(self.calc_move_values(temp_state_after_opp, self_move, iteration - 1))
-                    opp_move_values.append(np.max(self_move_values))
+        for i in range(self.iteration-1):
+            moves_and_temp_states = np.array([[prev_move, f'{prev_move}{move if move != NO_MOVE else ""}',
+                                               self.game.insert_piece(self.name, move, temp_state)
+                                               ]
+                                              for prev_move, temp_state in moves_and_temp_states[:, 1:]
+                                              for move in self.game.get_available_moves(temp_state)],
+                                             dtype='object')
+            self_move_idx.append(moves_and_temp_states[:, 0])
 
-        return np.min(opp_move_values)
+            moves_and_temp_states = np.array([[prev_move, f'{prev_move}{move if move != NO_MOVE else ""}',
+                                               self.game.insert_piece(self.name, move, temp_state)
+                                               ]
+                                              for prev_move, temp_state in moves_and_temp_states[:, 1:]
+                                              for move in self.game.get_available_moves(temp_state)],
+                                             dtype='object')
+            opp_move_idx.append(moves_and_temp_states[:, 0])
+
+        final_states = np.array([*moves_and_temp_states[:, 2]])
+        state_values = self.calc_state_values(final_states)
+
+        # check state winners
+        winners = [self.game.check_winner(temp_state) for temp_state in final_states]
+        state_values = np.array([value if winner is None else self.calc_reward(winner)
+                                 for value, winner in zip(state_values, winners)])
+
+        state_values = groupby_np(state_values, opp_move_idx[-1], uf=np.minimum)
+        for i in range(self.iteration-2, -1, -1):
+            state_values = groupby_np(state_values, self_move_idx[i], uf=np.maximum)
+            state_values = groupby_np(state_values, opp_move_idx[i], uf=np.minimum)
+
+        return state_values
 
     def learn_from_game(self, game_history, winner):
 
@@ -126,7 +140,7 @@ class DeepAgent(Player):
 
         # learn reward for last state
         reward = self.calc_reward(winner)
-        last_state_value = self.calc_state_value(self_states[-1])
+        last_state_value = self.calc_state_values(self_states[-1].reshape(1, *self_states[-1].shape))
         value_diff = reward - last_state_value
         target = last_state_value + self.learning_rate * value_diff
         self.value_model.fit(self_states[-1].reshape(1, *self_states[-1].shape, 1),
@@ -135,25 +149,13 @@ class DeepAgent(Player):
 
         # learn values of previous states
         for state, prev_state in zip(self_states[len(self_states)-1:0:-1], self_states[len(self_states)-2::-1]):
-            state_value = self.calc_state_value(state)
-            prev_state_value = self.calc_state_value(prev_state)
+            state_value = self.calc_state_values(state.reshape(1, *state.shape))
+            prev_state_value = self.calc_state_values(prev_state.reshape(1, *prev_state.shape))
             value_diff = state_value - prev_state_value
             target_for_prev_state = prev_state_value + self.learning_rate * value_diff
             self.value_model.fit(prev_state.reshape(1, *prev_state.shape, 1),
                                  np.array(target_for_prev_state),
                                  epochs=self.epochs, verbose=0)
-
-    def calc_target(self, state, winner):
-
-        prev_value = self.calc_state_value(self.prev_state)
-
-        if winner is None:
-            value_diff = self.calc_state_value(state) - prev_value
-        else:
-            value_diff = self.calc_reward(winner) - prev_value
-
-        target = prev_value + self.learning_rate * value_diff
-        return target
 
     def calc_reward(self, winner):
         if winner == self.name:
@@ -214,7 +216,7 @@ class VierGewinnt(Game):
         self.val2name = {val: name for name, val in self.name2val.items()}
 
         # init game
-        self.state = np.array((6, 7))
+        self.state = np.zeros((6, 7))
         self.winner = None
         self.turn_player = self.player1
         self.game_history = []
@@ -360,6 +362,9 @@ class VierGewinnt(Game):
         if state is None:
             state = self.state
 
+        if column == NO_MOVE:
+            return state
+
         if np.sum(state[:, column] == EMPTY) == 0:
             raise FullColumnException(f"Column {column} is full, cannot insert piece.")
 
@@ -373,4 +378,7 @@ class VierGewinnt(Game):
         if state is None:
             state = self.state
 
-        return np.arange(7)[np.sum(state == EMPTY, axis=0) > 0]
+        if self.check_winner(state) is None:
+            return np.arange(7)[np.sum(state == EMPTY, axis=0) > 0]
+        else:
+            return np.array([NO_MOVE])
